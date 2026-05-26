@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    container_name: argus-servicedesk-api-py
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn config.asgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 120"
+
+  db:
+    image: postgres:16
+    container_name: argus-servicedesk-py-db
+    environment:
+      POSTGRES_DB: argus_servicedesk
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    container_name: argus-servicedesk-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  pgdata:
+

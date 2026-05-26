@@ -1,0 +1,14 @@
+{% extends "email/base_email.html" %}
+
+{% block content %}
+<h2>{{ title }}</h2>
+<p>{{ message }}</p>
+
+<div style="background-color: #f8fafc; padding: 20px; border-radius: 4px; margin-top: 20px;">
+    <p><strong>Incident:</strong> {{ incident_number }}</p>
+    <p><strong>Priority:</strong> <span class="tag priority-{{ incident_priority|lower }}">{{ incident_priority }}</span></p>
+    <p><strong>Description:</strong> {{ incident_description }}</p>
+</div>
+
+<a href="{{ base_url }}/incidents/{{ incident_id }}" class="button">View Incident Details</a>
+{% endblock %}
