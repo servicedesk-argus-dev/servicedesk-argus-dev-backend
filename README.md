@@ -35,3 +35,32 @@ API base: `http://localhost:8000/api/v1`
 
 Health: `GET /health/`
 
+## Vault / Secrets
+
+Argus reads secrets only from environment variables or an optional env file rendered by Vault Agent.
+
+For local development:
+
+```bash
+copy .env.example .env
+```
+
+For Kubernetes production, keep real values in Vault and inject them as env vars, or render them to a file and set:
+
+```env
+ARGUS_SECRETS_FILE=/vault/secrets/argus-backend.env
+```
+
+Required production secrets include:
+
+```text
+DJANGO_SECRET_KEY
+JWT_SIGNING_KEY
+DATABASE_URL or DB_PASSWORD
+REDIS_URL
+KEYCLOAK_ISSUER
+ARGUS_WEBHOOK_API_TOKEN when ARGUS_WEBHOOK_REQUIRE_TOKEN=true
+```
+
+Never commit real `.env` files, tokens, passwords, or private keys.
+

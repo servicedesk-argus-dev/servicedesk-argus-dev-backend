@@ -57,8 +57,9 @@ def _authorization_token(request) -> str:
 
 def _authenticate_webhook(request) -> bool:
     configured_token = getattr(settings, "ARGUS_WEBHOOK_API_TOKEN", "")
+    require_token = getattr(settings, "ARGUS_WEBHOOK_REQUIRE_TOKEN", False)
     if not configured_token:
-        return True
+        return not require_token
     supplied_token = _authorization_token(request)
     return bool(supplied_token) and secrets.compare_digest(supplied_token, configured_token)
 

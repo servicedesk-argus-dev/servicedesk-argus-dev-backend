@@ -3,6 +3,7 @@ import sys
 import warnings
 from datetime import timedelta
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
@@ -10,10 +11,35 @@ from django.core.exceptions import ImproperlyConfigured
 BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 
+_secrets_file = os.getenv("ARGUS_SECRETS_FILE") or os.getenv("VAULT_SECRETS_FILE")
+if _secrets_file:
+    load_dotenv(_secrets_file, override=True)
+
+
+def env_bool(name, default=False):
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def env_list(name, default=""):
+    return [item.strip() for item in os.getenv(name, default).split(",") if item.strip()]
+
+
+def require_env(name):
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ImproperlyConfigured(f"{name} environment variable is required")
+    return value
+
+
+DEBUG = env_bool("DJANGO_DEBUG", False)
+IS_PRODUCTION = not DEBUG
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:
     raise ImproperlyConfigured("DJANGO_SECRET_KEY environment variable is required")
-DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 
 # HS256: PyJWT recommends >= 32 bytes. Use JWT_SIGNING_KEY in production if SECRET_KEY is short.
 JWT_SIGNING_KEY = (os.getenv("JWT_SIGNING_KEY", "") or SECRET_KEY).strip()
@@ -29,9 +55,9 @@ if _jwt_key_len < 32:
             "JWT_SIGNING_KEY (or DJANGO_SECRET_KEY) must be at least 32 bytes for HS256 when DEBUG is False."
         )
 
-ALLOWED_HOSTS = [h.strip() for h in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
-CORS_ALLOWED_ORIGINS = [h.strip() for h in os.getenv("DJANGO_CORS_ALLOWED_ORIGINS", "").split(",") if h.strip()]
-CSRF_TRUSTED_ORIGINS = [h.strip() for h in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if h.strip()]
+ALLOWED_HOSTS = env_list("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1")
+CORS_ALLOWED_ORIGINS = env_list("DJANGO_CORS_ALLOWED_ORIGINS")
+CSRF_TRUSTED_ORIGINS = env_list("DJANGO_CSRF_TRUSTED_ORIGINS")
 
 _trusted_proxy_raw = os.getenv("TRUSTED_PROXY_IPS", "")
 TRUSTED_PROXY_IPS = tuple(x.strip() for x in _trusted_proxy_raw.split(",") if x.strip())
@@ -119,6 +145,8 @@ EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
 EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
 EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "Argus Service Desk <noreply@argus.io>")
+if IS_PRODUCTION and EMAIL_BACKEND.endswith(".smtp.EmailBackend") and not EMAIL_HOST_PASSWORD:
+    raise ImproperlyConfigured("EMAIL_HOST_PASSWORD is required when SMTP email is enabled in production.")
 
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
@@ -126,22 +154,52 @@ ASGI_APPLICATION = "config.asgi.application"
 DB_ENGINE = os.getenv("DB_ENGINE", "django.db.backends.postgresql")
 IS_RUNSERVER = len(sys.argv) > 1 and sys.argv[1] == "runserver"
 DEFAULT_CONN_MAX_AGE = "0" if (DEBUG or IS_RUNSERVER) else "60"
-DATABASES = {
-    "default": {
-        "ENGINE": DB_ENGINE,
-        "NAME": os.getenv("DB_NAME", "argus_servicedesk"),
-        "USER": os.getenv("DB_USER", "postgres"),
-        "PASSWORD": os.getenv("DB_PASSWORD", "postgres"),
-        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+
+
+def database_config_from_url(database_url):
+    parsed = urlparse(database_url)
+    if parsed.scheme not in {"postgres", "postgresql"}:
+        raise ImproperlyConfigured("DATABASE_URL must use postgres:// or postgresql://")
+    query = parse_qs(parsed.query)
+    options = {}
+    if query.get("sslmode"):
+        options["sslmode"] = query["sslmode"][0]
+    config = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": unquote(parsed.path.lstrip("/")),
+        "USER": unquote(parsed.username or ""),
+        "PASSWORD": unquote(parsed.password or ""),
+        "HOST": parsed.hostname or "",
+        "PORT": str(parsed.port or 5432),
         "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", DEFAULT_CONN_MAX_AGE)),
         "CONN_HEALTH_CHECKS": True,
         "ATOMIC_REQUESTS": True,
     }
-}
+    if options:
+        config["OPTIONS"] = options
+    return config
 
-if not DEBUG and not os.getenv("DB_PASSWORD", "").strip():
-    raise ImproperlyConfigured("DB_PASSWORD is required when DEBUG is False.")
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if DATABASE_URL:
+    DATABASES = {"default": database_config_from_url(DATABASE_URL)}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": DB_ENGINE,
+            "NAME": os.getenv("DB_NAME", "argus_servicedesk"),
+            "USER": os.getenv("DB_USER", "postgres"),
+            "PASSWORD": os.getenv("DB_PASSWORD", "postgres" if DEBUG else ""),
+            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+            "PORT": os.getenv("DB_PORT", "5432"),
+            "CONN_MAX_AGE": int(os.getenv("DB_CONN_MAX_AGE", DEFAULT_CONN_MAX_AGE)),
+            "CONN_HEALTH_CHECKS": True,
+            "ATOMIC_REQUESTS": True,
+        }
+    }
+
+if IS_PRODUCTION and not DATABASE_URL and not os.getenv("DB_PASSWORD", "").strip():
+    raise ImproperlyConfigured("DATABASE_URL or DB_PASSWORD is required when DJANGO_DEBUG is False.")
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -177,15 +235,14 @@ SIMPLE_JWT = {
     "SIGNING_KEY": JWT_SIGNING_KEY,
 }
 
-KEYCLOAK_ENABLED = os.getenv("KEYCLOAK_ENABLED", "true").lower() == "true"
-KEYCLOAK_ISSUER = os.getenv(
-    "KEYCLOAK_ISSUER",
-    "http://localhost:8082/realms/ArgusService%20Desk",
-).rstrip("/")
-KEYCLOAK_JWKS_URL = os.getenv(
-    "KEYCLOAK_JWKS_URL",
-    f"{KEYCLOAK_ISSUER}/protocol/openid-connect/certs",
-)
+KEYCLOAK_ENABLED = env_bool("KEYCLOAK_ENABLED", True)
+_default_keycloak_issuer = "" if IS_PRODUCTION else "http://localhost:8082/realms/ArgusService%20Desk"
+KEYCLOAK_ISSUER = os.getenv("KEYCLOAK_ISSUER", _default_keycloak_issuer).rstrip("/")
+if IS_PRODUCTION and KEYCLOAK_ENABLED and not KEYCLOAK_ISSUER:
+    raise ImproperlyConfigured("KEYCLOAK_ISSUER is required when Keycloak is enabled in production.")
+KEYCLOAK_JWKS_URL = os.getenv("KEYCLOAK_JWKS_URL", f"{KEYCLOAK_ISSUER}/protocol/openid-connect/certs" if KEYCLOAK_ISSUER else "")
+if IS_PRODUCTION and KEYCLOAK_ENABLED and not KEYCLOAK_JWKS_URL:
+    raise ImproperlyConfigured("KEYCLOAK_JWKS_URL is required when Keycloak is enabled in production.")
 KEYCLOAK_ALLOWED_CLIENTS = tuple(
     client.strip()
     for client in os.getenv("KEYCLOAK_ALLOWED_CLIENTS", "argus-frontend,Argus-Frontend").split(",")
@@ -196,14 +253,16 @@ KEYCLOAK_RBAC_CLIENTS = tuple(
     for client in os.getenv("KEYCLOAK_RBAC_CLIENTS", "Argus-Frontend,Argus-Backend").split(",")
     if client.strip()
 )
-KEYCLOAK_AUTO_CREATE_USERS = os.getenv("KEYCLOAK_AUTO_CREATE_USERS", "true").lower() == "true"
+KEYCLOAK_AUTO_CREATE_USERS = env_bool("KEYCLOAK_AUTO_CREATE_USERS", True)
 KEYCLOAK_DEFAULT_CLIENT_ORG = os.getenv("KEYCLOAK_DEFAULT_CLIENT_ORG", "").strip()
-KEYCLOAK_SYNC_LOCAL_ROLES = os.getenv("KEYCLOAK_SYNC_LOCAL_ROLES", "true").lower() == "true"
-KEYCLOAK_PASSWORD_LOGIN_ENABLED = os.getenv("KEYCLOAK_PASSWORD_LOGIN_ENABLED", "false").lower() == "true"
+KEYCLOAK_SYNC_LOCAL_ROLES = env_bool("KEYCLOAK_SYNC_LOCAL_ROLES", True)
+KEYCLOAK_PASSWORD_LOGIN_ENABLED = env_bool("KEYCLOAK_PASSWORD_LOGIN_ENABLED", False)
 KEYCLOAK_PASSWORD_GRANT_CLIENT_ID = os.getenv("KEYCLOAK_PASSWORD_GRANT_CLIENT_ID", "").strip()
 KEYCLOAK_CLIENT_SECRET = os.getenv("KEYCLOAK_CLIENT_SECRET", "").strip()
 KEYCLOAK_TOKEN_URL = os.getenv("KEYCLOAK_TOKEN_URL", "").strip()
 KEYCLOAK_TOKEN_TIMEOUT = int(os.getenv("KEYCLOAK_TOKEN_TIMEOUT", "10"))
+if IS_PRODUCTION and KEYCLOAK_PASSWORD_LOGIN_ENABLED and not KEYCLOAK_PASSWORD_GRANT_CLIENT_ID:
+    raise ImproperlyConfigured("KEYCLOAK_PASSWORD_GRANT_CLIENT_ID is required when password login is enabled.")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "Argus Service Desk Python API",
@@ -218,7 +277,9 @@ SPECTACULAR_SETTINGS = {
     ],
 }
 
-REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+REDIS_URL = os.getenv("REDIS_URL", "" if IS_PRODUCTION else "redis://127.0.0.1:6379/0")
+if IS_PRODUCTION and not REDIS_URL:
+    raise ImproperlyConfigured("REDIS_URL is required when DJANGO_DEBUG is False.")
 SOCKETIO_REDIS_URL = os.getenv("SOCKETIO_REDIS_URL", REDIS_URL)
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
@@ -230,6 +291,9 @@ if not DEBUG and not ALERTMANAGER_URL:
 # Inbound machine-to-machine webhook auth. LinkedEye sends this as:
 # Authorization: Bearer <ARGUS_API_TOKEN>
 ARGUS_WEBHOOK_API_TOKEN = os.getenv("ARGUS_WEBHOOK_API_TOKEN", os.getenv("ARGUS_API_TOKEN", "")).strip()
+ARGUS_WEBHOOK_REQUIRE_TOKEN = env_bool("ARGUS_WEBHOOK_REQUIRE_TOKEN", IS_PRODUCTION)
+if ARGUS_WEBHOOK_REQUIRE_TOKEN and not ARGUS_WEBHOOK_API_TOKEN:
+    raise ImproperlyConfigured("ARGUS_WEBHOOK_API_TOKEN is required when ARGUS_WEBHOOK_REQUIRE_TOKEN is true.")
 ARGUS_WEBHOOK_SYSTEM_USER_EMAIL = os.getenv("ARGUS_WEBHOOK_SYSTEM_USER_EMAIL", "linkedeye.webhook@argus.local").strip()
 ARGUS_WEBHOOK_DEFAULT_ORG_SLUG = os.getenv("ARGUS_WEBHOOK_DEFAULT_ORG_SLUG", "").strip()
 

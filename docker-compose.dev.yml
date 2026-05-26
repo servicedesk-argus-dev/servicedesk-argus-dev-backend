@@ -7,7 +7,11 @@ services:
     env_file:
       - .env
     environment:
+      DJANGO_DEBUG: "true"
       DB_HOST: db
+      DB_NAME: ${POSTGRES_DB:-argus_servicedesk}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -22,9 +26,9 @@ services:
     image: postgres:16
     container_name: argus-servicedesk-py-db
     environment:
-      POSTGRES_DB: argus_servicedesk
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-argus_servicedesk}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
       - "5432:5432"
     volumes:
