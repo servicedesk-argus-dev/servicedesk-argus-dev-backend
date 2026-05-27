@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; background-color: #f4f7f6; }
+        .container { max-width: 600px; margin: 20px auto; background: #ffffff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { border-bottom: 2px solid #2563eb; padding-bottom: 20px; margin-bottom: 30px; }
+        .header h1 { color: #2563eb; margin: 0; font-size: 24px; }
+        .content { margin-bottom: 30px; }
+        .footer { font-size: 12px; color: #666; border-top: 1px solid #eee; padding-top: 20px; text-align: center; }
+        .button { display: inline-block; padding: 12px 24px; background-color: #2563eb; color: #ffffff !important; text-decoration: none; border-radius: 4px; font-weight: bold; margin-top: 20px; }
+        .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; text-transform: uppercase; margin-right: 5px; }
+        .priority-p1 { background-color: #fee2e2; color: #991b1b; }
+        .priority-p2 { background-color: #ffedd5; color: #9a3412; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Argus Service Desk</h1>
+        </div>
+        <div class="content">
+            {% block content %}{% endblock %}
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 Argus IT Solutions. All rights reserved.</p>
+            <p>This is an automated notification. Please do not reply to this email.</p>
+            <p><a href="{{ base_url }}/settings/notifications">Manage notification preferences</a></p>
+        </div>
+    </div>
+</body>
+</html>
