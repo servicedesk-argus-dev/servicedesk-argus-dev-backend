@@ -1,6 +1,6 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Q
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -659,8 +659,12 @@ class UserListView(APIView):
             data["organization_id"] = str(request.organization_id)
 
         serializer = ManagedUserCreateSerializer(data=data, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        if not serializer.is_valid():
+            return failure("Validation failed.", errors=serializer.errors, status_code=400)
+        try:
+            user = serializer.save()
+        except serializers.ValidationError as exc:
+            return failure("Validation failed.", errors=exc.detail, status_code=400)
         create_audit_log(
             request,
             "USER_CREATED",
@@ -700,8 +704,12 @@ class UserDetailView(APIView):
         if not is_service_desk_staff(request.user):
             data.pop("organization_id", None)
         serializer = ManagedUserUpdateSerializer(user, data=data, partial=True, context={"request": request})
-        serializer.is_valid(raise_exception=True)
-        user = serializer.save()
+        if not serializer.is_valid():
+            return failure("Validation failed.", errors=serializer.errors, status_code=400)
+        try:
+            user = serializer.save()
+        except serializers.ValidationError as exc:
+            return failure("Validation failed.", errors=exc.detail, status_code=400)
         return success(UserSerializer(user).data, "user updated")
 
     def delete(self, request, pk):
@@ -730,7 +738,8 @@ class UserResetPasswordView(APIView):
             return failure("User not found.", status_code=404)
 
         serializer = PasswordSetSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return failure("Validation failed.", errors=serializer.errors, status_code=400)
         user.set_password(serializer.validated_data["password"])
         user.must_change_password = serializer.validated_data["must_change_password"]
         user.save(update_fields=["password", "must_change_password", "updated_at"])

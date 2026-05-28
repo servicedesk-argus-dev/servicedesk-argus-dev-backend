@@ -73,7 +73,31 @@ class ManagedAccountCreationTests(APITestCase):
         )
 
         self.assertEqual(response.status_code, 400)
-        self.assertIn("organization_id", response.data)
+        self.assertFalse(response.data["success"])
+        self.assertIn("organization_id", response.data["errors"])
+
+    def test_duplicate_account_returns_structured_validation_error(self):
+        User.objects.create_user(
+            username="duplicate@example.com",
+            email="duplicate@example.com",
+            password="ExistingPass123!",
+            organization=self.org,
+        )
+
+        response = self.client.post(
+            "/api/v1/auth/users/",
+            {
+                "email": "duplicate@example.com",
+                "password": "TempPass123!",
+                "role_name": "Client User",
+                "organization_id": str(self.org.id),
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data["success"])
+        self.assertIn("email", response.data["errors"])
 
 
 class RoleCompatibilityTests(APITestCase):
