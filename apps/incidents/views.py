@@ -254,6 +254,36 @@ class IncidentProblemLinkView(APIView):
         )
 
 
+class IncidentProblemUnlinkView(APIView):
+    permission_classes = [IsAuthenticated, DenyViewerMutations]
+
+    def delete(self, request, pk, link_id):
+        incident = _incident_queryset_for_request(request).filter(pk=pk).first()
+        if incident is None:
+            return failure("incident not found", status_code=404)
+        if is_service_desk_staff(request.user) and not can_edit_service_record(request.user, incident):
+            return failure("Only assigned engineers, NOC, leads, or admins can unlink incidents.", status_code=403)
+        if is_service_desk_staff(request.user) and not user_has_any_permission(request.user, "incident:link", "incident:manage"):
+            return failure("You do not have permission to unlink incident problems.", status_code=403)
+
+        link = IncidentProblem.objects.filter(pk=link_id, incident=incident).select_related("problem").first()
+        if link is None:
+            return failure("problem link not found", status_code=404)
+
+        problem_number = link.problem.number
+        problem = link.problem
+        link.delete()
+        create_activity(
+            request=request,
+            action="PROBLEM_UNLINKED",
+            description=f"Unlinked problem {problem_number}",
+            user=request.user,
+            incident=incident,
+            problem=problem,
+        )
+        return success({"id": str(link_id)}, "problem unlinked from incident")
+
+
 class IncidentChangeLinkView(APIView):
     permission_classes = [IsAuthenticated, DenyViewerMutations]
 
@@ -316,6 +346,36 @@ class IncidentChangeLinkView(APIView):
             "change linked to incident" if created else "incident change link updated",
             201 if created else 200,
         )
+
+
+class IncidentChangeUnlinkView(APIView):
+    permission_classes = [IsAuthenticated, DenyViewerMutations]
+
+    def delete(self, request, pk, link_id):
+        incident = _incident_queryset_for_request(request).filter(pk=pk).first()
+        if incident is None:
+            return failure("incident not found", status_code=404)
+        if is_service_desk_staff(request.user) and not can_edit_service_record(request.user, incident):
+            return failure("Only assigned engineers, NOC, leads, or admins can unlink incidents.", status_code=403)
+        if is_service_desk_staff(request.user) and not user_has_any_permission(request.user, "incident:link", "incident:manage"):
+            return failure("You do not have permission to unlink incident changes.", status_code=403)
+
+        link = IncidentChange.objects.filter(pk=link_id, incident=incident).select_related("change").first()
+        if link is None:
+            return failure("change link not found", status_code=404)
+
+        change_number = link.change.number
+        change = link.change
+        link.delete()
+        create_activity(
+            request=request,
+            action="CHANGE_UNLINKED",
+            description=f"Unlinked change {change_number}",
+            user=request.user,
+            incident=incident,
+            change=change,
+        )
+        return success({"id": str(link_id)}, "change unlinked from incident")
 
 
 class WorkNoteCreateView(APIView):

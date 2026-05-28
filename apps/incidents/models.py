@@ -283,6 +283,11 @@ class IncidentProblem(models.Model):
 
 
 class IncidentChange(models.Model):
+    class LinkType(models.TextChoices):
+        RELATED_CHANGE = "RELATED_CHANGE", "Related Change"
+        FIXED_BY_CHANGE = "FIXED_BY_CHANGE", "Fixed By Change"
+        CAUSED_BY_CHANGE = "CAUSED_BY_CHANGE", "Caused By Change"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     incident = models.ForeignKey(
         'incidents.Incident',
@@ -294,6 +299,7 @@ class IncidentChange(models.Model):
         on_delete=models.CASCADE,
         related_name='linked_incidents',
     )
+    link_type = models.CharField(max_length=30, choices=LinkType.choices, default=LinkType.RELATED_CHANGE)
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

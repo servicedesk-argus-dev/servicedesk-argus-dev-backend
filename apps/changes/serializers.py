@@ -49,6 +49,7 @@ class ChangeActivitySerializer(serializers.ModelSerializer):
 
 class ChangeLinkedIncidentSerializer(serializers.Serializer):
     id = serializers.UUIDField()
+    link_type = serializers.CharField(default="RELATED_CHANGE")
     notes = serializers.CharField(default=None)
     incident = serializers.SerializerMethodField()
 

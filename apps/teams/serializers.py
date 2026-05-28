@@ -50,7 +50,7 @@ class TeamSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    members = TeamMemberSerializer(many=True, read_only=True)
+    members = serializers.SerializerMethodField()
     member_ids = serializers.ListField(
         child=serializers.UUIDField(),
         write_only=True,
@@ -78,6 +78,20 @@ class TeamSerializer(serializers.ModelSerializer):
             "assignedChanges": getattr(obj, "assignedChanges", 0),
             "assignedProblems": getattr(obj, "assignedProblems", 0),
         }
+
+    def get_members(self, obj):
+        members = obj.members.select_related("user").filter(user__is_active=True, user__is_active_member=True)
+        request = self.context.get("request")
+        if request is not None and is_service_desk_staff(request.user):
+            org_id = (
+                request.query_params.get("organization")
+                or request.query_params.get("organization_id")
+                or getattr(request, "organization_id", None)
+            )
+            if org_id:
+                members = members.filter(user__organization_id=org_id)
+        members = members.order_by("joined_at", "user__first_name", "user__last_name", "user__email")
+        return TeamMemberSerializer(members, many=True).data
 
     def validate_member_ids(self, member_ids):
         if not member_ids:

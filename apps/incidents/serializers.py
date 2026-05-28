@@ -9,6 +9,23 @@ from apps.sla.services import derive_incident_priority, get_sla_targets, apply_i
 from apps.assignments.validation import validate_assignment_attrs
 
 
+def _assignment_group_payload(team):
+    if team:
+        return {'id': str(team.id), 'name': team.name}
+    return None
+
+
+def _assigned_user_payload(user):
+    if user:
+        return {
+            'id': str(user.id),
+            'email': user.email,
+            'first_name': user.first_name,
+            'last_name': user.last_name,
+        }
+    return None
+
+
 class IncidentProblemSerializer(serializers.ModelSerializer):
     problem = serializers.SerializerMethodField()
 
@@ -24,6 +41,8 @@ class IncidentProblemSerializer(serializers.ModelSerializer):
                 'number': obj.problem.number,
                 'short_description': obj.problem.short_description,
                 'state': obj.problem.state,
+                'assignment_group': _assignment_group_payload(obj.problem.assignment_group),
+                'assigned_to': _assigned_user_payload(obj.problem.assigned_to),
             }
         return None
 
@@ -33,7 +52,7 @@ class IncidentChangeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = IncidentChange
-        fields = ['id', 'change', 'notes']
+        fields = ['id', 'change', 'link_type', 'notes']
         read_only_fields = ['id']
 
     def get_change(self, obj):
@@ -43,6 +62,8 @@ class IncidentChangeSerializer(serializers.ModelSerializer):
                 'number': obj.change.number,
                 'short_description': obj.change.short_description,
                 'state': obj.change.state,
+                'assignment_group': _assignment_group_payload(obj.change.assignment_group),
+                'assigned_to': _assigned_user_payload(obj.change.assigned_to),
             }
         return None
 
