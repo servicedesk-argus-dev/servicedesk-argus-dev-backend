@@ -36,6 +36,10 @@ def require_env(name):
 
 DEBUG = env_bool("DJANGO_DEBUG", False)
 IS_PRODUCTION = not DEBUG
+ARGUS_ENV = os.getenv("ARGUS_ENV", "development")
+APP_VERSION = os.getenv("APP_VERSION", "v1.0.0")
+BUILD_COMMIT = os.getenv("BUILD_COMMIT", "local")
+BUILD_TIME = os.getenv("BUILD_TIME", "")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 if not SECRET_KEY:

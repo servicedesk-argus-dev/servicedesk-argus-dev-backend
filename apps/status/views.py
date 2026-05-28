@@ -1,5 +1,6 @@
 import time
 
+from django.conf import settings
 from django.db import connection
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -15,7 +16,12 @@ class StatusView(APIView):
             {
                 "status": "ok",
                 "service": "argus-servicedesk-api",
-                "version": "v1",
+                "version": settings.APP_VERSION,
+                "appVersion": settings.APP_VERSION,
+                "apiVersion": "v1",
+                "environment": settings.ARGUS_ENV,
+                "buildCommit": settings.BUILD_COMMIT,
+                "buildTime": settings.BUILD_TIME,
             }
         )
 
