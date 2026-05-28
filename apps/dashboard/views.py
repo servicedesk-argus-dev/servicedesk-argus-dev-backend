@@ -1,6 +1,7 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from django.db.models import Count
+from django.db.models.functions import TruncDate
 from django.utils import timezone
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.views import APIView
@@ -169,27 +170,36 @@ class DashboardIncidentTrendView(APIView):
         except (TypeError, ValueError):
             days = 7
 
-        since = timezone.now() - timedelta(days=days - 1)
+        start_day = timezone.localdate() - timedelta(days=days - 1)
+        since = timezone.make_aware(
+            datetime.combine(start_day, time.min),
+            timezone.get_current_timezone(),
+        )
         incidents = _scope_for_org(Incident.objects.all(), org_id).filter(created_at__gte=since)
         resolved = _scope_for_org(Incident.objects.all(), org_id).filter(resolved_at__gte=since)
 
         created_map = {
             _sql_day_to_date(row["day"]): row["count"]
-            for row in incidents.extra({"day": "date(created_at)"}).values("day").annotate(count=Count("id"))
+            for row in incidents.annotate(day=TruncDate("created_at")).values("day").annotate(count=Count("id"))
         }
         resolved_map = {
             _sql_day_to_date(row["day"]): row["count"]
-            for row in resolved.extra({"day": "date(resolved_at)"}).values("day").annotate(count=Count("id"))
+            for row in resolved.annotate(day=TruncDate("resolved_at")).values("day").annotate(count=Count("id"))
         }
 
         data = []
         for offset in range(days):
-            day = (since + timedelta(days=offset)).date()
+            day = start_day + timedelta(days=offset)
+            created_count = created_map.get(day, 0)
+            resolved_count = resolved_map.get(day, 0)
             data.append(
                 {
                     "day": day.isoformat(),
-                    "incidents": created_map.get(day, 0),
-                    "resolved": resolved_map.get(day, 0),
+                    "date": day.isoformat(),
+                    "count": created_count,
+                    "incidents": created_count,
+                    "created": created_count,
+                    "resolved": resolved_count,
                 }
             )
         return success(data)

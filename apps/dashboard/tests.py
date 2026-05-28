@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from apps.accounts.models import User
 from apps.dashboard.views import _dashboard_payload
@@ -18,6 +19,8 @@ class DashboardIncidentStatsTests(TestCase):
             password="pass",
             organization=self.org,
         )
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
 
     def _incident(self, number, *, source, state=Incident.State.NEW):
         return Incident.objects.create(
@@ -72,3 +75,19 @@ class DashboardIncidentStatsTests(TestCase):
 
         self.assertEqual(stats["total"], 2)
         self.assertEqual(stats["automated"], 2)
+
+    def test_incident_trend_returns_chart_ready_counts(self):
+        self._incident("INC-DASH-006", source=Incident.Source.MANUAL)
+        self._incident("INC-DASH-007", source=Incident.Source.API, state=Incident.State.RESOLVED)
+
+        response = self.api.get("/api/v1/dashboard/incident-trend?days=7")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        rows = response.data["data"]
+        self.assertEqual(len(rows), 7)
+        today = rows[-1]
+        self.assertIn("date", today)
+        self.assertIn("count", today)
+        self.assertIn("created", today)
+        self.assertIn("incidents", today)
+        self.assertGreaterEqual(today["count"], 2)

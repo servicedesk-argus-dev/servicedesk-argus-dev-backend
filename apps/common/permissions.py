@@ -27,6 +27,7 @@ class Roles:
 
 
 ROLE_TOKEN_NAMES = {
+    "ADMIN",
     "SUPER_ADMIN",
     "ORG_ADMIN",
     "MANAGER",
@@ -39,6 +40,7 @@ ROLE_TOKEN_NAMES = {
 }
 
 ROLE_TOKEN_TO_NAME = {
+    "ADMIN": Roles.ORG_ADMIN,
     "SUPER_ADMIN": Roles.SUPER_ADMIN,
     "ORG_ADMIN": Roles.ORG_ADMIN,
     "MANAGER": Roles.MANAGER,
@@ -404,6 +406,10 @@ def can_manage_users(user: User) -> bool:
         user,
         *USER_MANAGE_PERMISSIONS,
     )
+
+
+def can_manage_clients(user: User) -> bool:
+    return has_any_role(user, Roles.SUPER_ADMIN, Roles.ORG_ADMIN) or user_has_permission(user, "client:manage")
 
 
 def is_assigned_to_service_record(user: User, obj) -> bool:

@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 from apps.common.permissions import Roles, user_has_permission
 from apps.organizations.models import Organization
 from apps.teams.models import Team
-from .models import Role
+from .models import Permission, Role
 
 
 User = get_user_model()
@@ -61,6 +61,62 @@ class ManagedAccountCreationTests(APITestCase):
         self.assertEqual(list(user.team_memberships.values_list("team__name", flat=True)), ["Infra Team"])
         self.assertTrue(user_has_permission(user, "incident:update"))
 
+    def test_super_admin_creates_admin_account(self):
+        response = self.client.post(
+            "/api/v1/auth/users/",
+            {
+                "email": "admin2@example.com",
+                "password": "TempPass123!",
+                "role_name": "Org Admin",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        user = User.objects.get(email="admin2@example.com")
+        self.assertEqual(user.role_names, [Roles.ORG_ADMIN])
+        self.assertTrue(user_has_permission(user, "user:manage"))
+        self.assertTrue(user_has_permission(user, "client:manage"))
+        self.assertFalse(user_has_permission(user, "*:*"))
+
+    def test_admin_alias_creates_org_admin_account(self):
+        response = self.client.post(
+            "/api/v1/auth/users/",
+            {
+                "email": "admin-alias@example.com",
+                "password": "TempPass123!",
+                "role_name": "Admin",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        user = User.objects.get(email="admin-alias@example.com")
+        self.assertEqual(user.role_names, [Roles.ORG_ADMIN])
+
+    def test_manager_cannot_create_admin_account(self):
+        manager = User.objects.create_user(
+            username="manager@example.com",
+            email="manager@example.com",
+            password="ManagerPass123!",
+        )
+        manager.roles.add(Role.objects.create(name=Roles.MANAGER))
+        self.client.force_authenticate(manager)
+
+        response = self.client.post(
+            "/api/v1/auth/users/",
+            {
+                "email": "blocked-admin@example.com",
+                "password": "TempPass123!",
+                "role_name": "Org Admin",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.data["success"])
+        self.assertIn("role_name", response.data["errors"])
+
     def test_client_scoped_roles_require_client_organization(self):
         response = self.client.post(
             "/api/v1/auth/users/",
@@ -111,3 +167,39 @@ class RoleCompatibilityTests(APITestCase):
 
         self.assertTrue(user_has_permission(user, "incident:update"))
         self.assertTrue(user.has_role(Roles.ENGINEER))
+
+
+class RolePermissionAccessTests(APITestCase):
+    def setUp(self):
+        self.super_admin = User.objects.create_user(
+            username="superadmin@example.com",
+            email="superadmin@example.com",
+            password="SuperPass123!",
+        )
+        self.super_admin.roles.add(Role.objects.create(name=Roles.SUPER_ADMIN))
+
+        self.org_admin = User.objects.create_user(
+            username="orgadmin@example.com",
+            email="orgadmin@example.com",
+            password="AdminPass123!",
+        )
+        self.org_admin.roles.add(Role.objects.create(name=Roles.ORG_ADMIN))
+        Permission.objects.create(code="incident:read", description="Read incidents")
+
+    def test_org_admin_cannot_open_role_permission_admin_api(self):
+        self.client.force_authenticate(self.org_admin)
+
+        roles_response = self.client.get("/api/v1/auth/roles")
+        permissions_response = self.client.get("/api/v1/auth/permissions")
+
+        self.assertEqual(roles_response.status_code, 403)
+        self.assertEqual(permissions_response.status_code, 403)
+
+    def test_super_admin_can_open_role_permission_admin_api(self):
+        self.client.force_authenticate(self.super_admin)
+
+        roles_response = self.client.get("/api/v1/auth/roles")
+        permissions_response = self.client.get("/api/v1/auth/permissions")
+
+        self.assertEqual(roles_response.status_code, 200, roles_response.data)
+        self.assertEqual(permissions_response.status_code, 200, permissions_response.data)

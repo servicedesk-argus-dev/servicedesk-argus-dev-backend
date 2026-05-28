@@ -1,6 +1,7 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.db.models import Q
 from rest_framework import serializers, viewsets
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -16,6 +17,7 @@ from apps.common.permissions import (
     is_service_desk_staff,
     permission_code_from_keycloak_role,
     role_token_name,
+    user_has_permission,
 )
 from apps.common.responses import failure, success
 from apps.common.audit import create_audit_log
@@ -85,9 +87,20 @@ class PermissionViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = PermissionSerializer
     permission_classes = [IsAuthenticated]
 
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not user_has_permission(request.user, "*:*"):
+            raise PermissionDenied("Only a Super Admin can view permissions.")
+
+
 class RoleViewSet(viewsets.ModelViewSet):
     serializer_class = RoleSerializer
     permission_classes = [IsAuthenticated]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if not user_has_permission(request.user, "*:*"):
+            raise PermissionDenied("Only a Super Admin can manage roles and permissions.")
 
     def get_queryset(self):
         return Role.objects.all().order_by('name')

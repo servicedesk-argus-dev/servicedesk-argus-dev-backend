@@ -8,6 +8,7 @@ from apps.common.permissions import (
     canonical_role_name,
     is_service_desk_staff,
     user_has_any_permission,
+    user_has_permission,
     user_permission_codes,
 )
 from apps.organizations.models import Organization
@@ -42,6 +43,7 @@ INTERNAL_ROLE_NAMES = {
 
 DEFAULT_ROLE_DESCRIPTIONS = {
     Roles.SUPER_ADMIN: "FinSpot admin with access to all clients and records.",
+    Roles.ORG_ADMIN: "Internal service-desk admin for client, user, team, queue, and ticket administration.",
     Roles.CLIENT_USER: "Client portal user scoped to one organization.",
     Roles.ENGINEER: "Internal resolver who works assigned tickets.",
     Roles.TEAM_LEAD: "Internal lead who manages team queues and assignments.",
@@ -287,6 +289,7 @@ class ManagedUserCreateSerializer(serializers.Serializer):
         attrs["role_name"] = role_name
         organization = attrs.get("organization")
         team_ids = attrs.get("team_ids", [])
+        request_user = getattr(self.context.get("request"), "user", None)
 
         if role_name in CLIENT_ROLE_NAMES and organization is None:
             raise serializers.ValidationError(
@@ -295,6 +298,11 @@ class ManagedUserCreateSerializer(serializers.Serializer):
         if role_name in CLIENT_ROLE_NAMES and team_ids:
             raise serializers.ValidationError({"team_ids": "Client users cannot be assigned to resolver teams."})
         _resolve_team_ids(self.context.get("request"), team_ids)
+
+        if role_name in {Roles.SUPER_ADMIN, Roles.ORG_ADMIN} and not user_has_permission(request_user, "*:*"):
+            raise serializers.ValidationError(
+                {"role_name": "Only a Super Admin can create Admin or Super Admin accounts."}
+            )
 
         if role_name == Roles.SUPER_ADMIN:
             attrs["organization"] = None

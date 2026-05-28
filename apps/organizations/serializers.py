@@ -4,6 +4,8 @@ from .models import Organization
 
 
 class OrganizationSerializer(serializers.ModelSerializer):
+    slug = serializers.SlugField(required=False, allow_blank=True)
+
     class Meta:
         model = Organization
         fields = ("id", "name", "slug", "is_active", "created_at", "updated_at")
