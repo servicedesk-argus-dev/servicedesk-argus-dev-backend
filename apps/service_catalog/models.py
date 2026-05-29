@@ -82,6 +82,9 @@ class ServiceRequest(models.Model):
     short_description = models.CharField(max_length=255, default="")
     description = models.TextField(blank=True, null=True)
     priority = models.CharField(max_length=2, default="P3")
+    catalog_item_label = models.CharField(max_length=200, blank=True, null=True)
+    category_label = models.CharField(max_length=100, blank=True, null=True)
+    estimated_delivery = models.CharField(max_length=100, blank=True, null=True)
     
     requested_for = models.ForeignKey(User, on_delete=models.PROTECT, related_name='service_requests')
     opened_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name='opened_service_requests')

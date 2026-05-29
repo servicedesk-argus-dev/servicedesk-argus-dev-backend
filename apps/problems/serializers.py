@@ -22,6 +22,7 @@ from apps.changes.models import Change
 from apps.accounts.serializers import UserSerializer
 from apps.assignments.validation import validate_assignment_attrs
 from apps.incidents.models import Activity
+from apps.organizations.models import Organization
 from apps.organizations.serializers import OrganizationSerializer
 from apps.teams.models import Team
 
@@ -227,6 +228,12 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
     related_change = serializers.PrimaryKeyRelatedField(
         queryset=Change.objects.all(), required=False, allow_null=True
     )
+    organization_id = serializers.PrimaryKeyRelatedField(
+        source="organization",
+        write_only=True,
+        required=False,
+        queryset=Organization.objects.filter(is_active=True),
+    )
 
     class Meta:
         model = Problem
@@ -241,6 +248,7 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
             "root_cause",
             "workaround",
             "permanent_fix",
+            "organization_id",
         ]
 
     def validate_short_description(self, value: str) -> str:
@@ -252,9 +260,13 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs: dict) -> dict:
         request = self.context["request"]
-        organization = getattr(request, "organization", None) or getattr(request.user, "organization", None)
+        from apps.common.permissions import is_service_desk_staff
+
+        organization = attrs.get("organization") or getattr(request, "organization", None) or getattr(request.user, "organization", None)
         if organization is None:
             return attrs
+        if not is_service_desk_staff(request.user) and organization.id != request.user.organization_id:
+            raise serializers.ValidationError({"organization_id": "Organization access denied."})
 
         related_change = attrs.get("related_change")
 
@@ -267,7 +279,7 @@ class ProblemCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data: dict) -> Problem:
         request = self.context["request"]
-        org = getattr(request, "organization", None) or getattr(request.user, "organization", None)
+        org = validated_data.pop("organization", None) or getattr(request, "organization", None) or getattr(request.user, "organization", None)
 
         if org is None:
             raise serializers.ValidationError(

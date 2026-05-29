@@ -166,13 +166,17 @@ class ProblemListCreateView(OrgQuerysetMixin, OrgScopedMixin, generics.ListCreat
         try:
             if not user_has_any_permission(request.user, "problem:create", "problem:manage"):
                 return failure("You do not have permission to create problems.", status_code=403)
-            if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not user_has_any_permission(
+            can_set_initial_assignment = is_service_desk_staff(request.user) and user_has_any_permission(
                 request.user,
-                "problem:assign",
+                "problem:create",
                 "problem:manage",
+            )
+            if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not (
+                can_set_initial_assignment
+                or user_has_any_permission(request.user, "problem:assign", "problem:manage")
             ):
                 return failure("Only NOC, leads, or admins can set problem assignment.", status_code=403)
-            if self._organization() is None:
+            if self._organization() is None and not request.data.get("organization_id"):
                 return failure("Organisation context required.", status_code=400)
             serializer = self.get_serializer(data=request.data)
             serializer.is_valid(raise_exception=True)

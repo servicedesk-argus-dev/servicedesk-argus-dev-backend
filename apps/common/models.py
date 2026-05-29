@@ -25,6 +25,11 @@ class AuditLog(models.Model):
     # Context
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(null=True, blank=True)
+    actor_email = models.EmailField(blank=True, default="")
+    method = models.CharField(max_length=10, blank=True, default="")
+    path = models.CharField(max_length=512, blank=True, default="")
+    status_code = models.PositiveSmallIntegerField(null=True, blank=True)
+    correlation_id = models.CharField(max_length=100, blank=True, default="")
     
     # Payload for deep auditing
     request_payload = models.JSONField(null=True, blank=True)
@@ -39,4 +44,6 @@ class AuditLog(models.Model):
             models.Index(fields=["organization", "created_at"]),
             models.Index(fields=["action"]),
             models.Index(fields=["resource_type", "resource_id"]),
+            models.Index(fields=["actor_email", "created_at"]),
+            models.Index(fields=["correlation_id"]),
         ]

@@ -1,17 +1,35 @@
-from rest_framework import viewsets, generics, status
+from django.db.models import Count, Q
+from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
-from django.db.models import Count
 from .models import AuditLog
 from .serializers import AuditLogSerializer
 from apps.common.responses import success
-from apps.common.mixins import OrgQuerysetMixin
-from apps.common.permissions import IsAdminOrManager
+from apps.common.permissions import IsAdminOrManager, is_service_desk_staff
 
-class AuditLogViewSet(OrgQuerysetMixin, viewsets.ReadOnlyModelViewSet):
+
+def audit_queryset_for_request(request):
+    queryset = AuditLog.objects.select_related("user", "organization").all()
+    if is_service_desk_staff(request.user):
+        org_id = (
+            request.query_params.get("organization")
+            or request.query_params.get("organization_id")
+            or getattr(request, "organization_id", None)
+        )
+        return queryset.filter(organization_id=org_id) if org_id else queryset
+    organization = getattr(request, "organization", None) or getattr(request.user, "organization", None)
+    if not organization:
+        return queryset.none()
+    return queryset.filter(organization=organization)
+
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AuditLog.objects.all()
     serializer_class = AuditLogSerializer
     permission_classes = [IsAuthenticated, IsAdminOrManager]
+
+    def get_queryset(self):
+        return audit_queryset_for_request(self.request)
     
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
@@ -20,6 +38,10 @@ class AuditLogViewSet(OrgQuerysetMixin, viewsets.ReadOnlyModelViewSet):
         action = request.query_params.get('action')
         resource_type = request.query_params.get('resourceType')
         severity = request.query_params.get('severity')
+        actor_email = request.query_params.get('actorEmail')
+        correlation_id = request.query_params.get('correlationId')
+        method = request.query_params.get('method')
+        status_code = request.query_params.get('statusCode')
         start_date = request.query_params.get('startDate')
         end_date = request.query_params.get('endDate')
         
@@ -27,6 +49,25 @@ class AuditLogViewSet(OrgQuerysetMixin, viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(action__icontains=action)
         if resource_type:
             queryset = queryset.filter(resource_type=resource_type)
+        if actor_email:
+            queryset = queryset.filter(actor_email__icontains=actor_email)
+        if correlation_id:
+            queryset = queryset.filter(correlation_id=correlation_id)
+        if method:
+            queryset = queryset.filter(method=method.upper())
+        if status_code:
+            queryset = queryset.filter(status_code=status_code)
+        if severity:
+            severity = severity.upper()
+            if severity == "CRITICAL":
+                queryset = queryset.filter(status_code__gte=500)
+            elif severity == "WARNING":
+                queryset = queryset.filter(
+                    Q(status_code__gte=400, status_code__lt=500)
+                    | Q(action__in=["LOGIN_FAILED", "KEYCLOAK_LOGIN_FAILED", "MFA_FAILED"])
+                )
+            elif severity == "INFO":
+                queryset = queryset.filter(Q(status_code__lt=400) | Q(status_code__isnull=True))
         if start_date:
             queryset = queryset.filter(created_at__date__gte=start_date)
         if end_date:
@@ -41,12 +82,10 @@ class AuditLogViewSet(OrgQuerysetMixin, viewsets.ReadOnlyModelViewSet):
         return success(serializer.data)
 
 class AuditResourceTypesView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAdminOrManager]
     
     def get(self, request):
-        types = AuditLog.objects.filter(
-            organization=request.organization
-        ).values_list('resource_type', flat=True).distinct()
+        types = audit_queryset_for_request(request).values_list('resource_type', flat=True).distinct()
         return success(list(types))
 
 class AuditAnomaliesView(APIView):
@@ -54,7 +93,7 @@ class AuditAnomaliesView(APIView):
     Stub for anomaly detection. In a real system, this would 
     query a separate table or perform real-time analysis.
     """
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsAdminOrManager]
     
     def get(self, request):
         from django.utils import timezone
@@ -65,8 +104,9 @@ class AuditAnomaliesView(APIView):
         one_hour_ago = timezone.now() - timedelta(hours=1)
         
         # 1. Bruteforce check: Multiple failed logins for same username/IP
-        failed_logins = AuditLog.objects.filter(
-            organization=request.organization,
+        scoped_queryset = audit_queryset_for_request(request)
+
+        failed_logins = scoped_queryset.filter(
             action="LOGIN_FAILED",
             created_at__gte=five_mins_ago
         ).values('description').annotate(count=Count('id')).filter(count__gt=3)
@@ -81,9 +121,8 @@ class AuditAnomaliesView(APIView):
             })
             
         # 2. Unusual deletion activity
-        deletions = AuditLog.objects.filter(
-            organization=request.organization,
-            action="DELETE",
+        deletions = scoped_queryset.filter(
+            action__startswith="DELETE",
             created_at__gte=one_hour_ago
         ).values('user__username').annotate(count=Count('id')).filter(count__gt=10)
         

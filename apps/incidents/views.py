@@ -97,10 +97,14 @@ class IncidentListCreateView(OrgQuerysetMixin, generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         if not user_has_any_permission(request.user, "incident:create", "incident:manage"):
             return failure("You do not have permission to create incidents.", status_code=403)
-        if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not user_has_any_permission(
+        can_set_initial_assignment = is_service_desk_staff(request.user) and user_has_any_permission(
             request.user,
-            "incident:assign",
+            "incident:create",
             "incident:manage",
+        )
+        if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not (
+            can_set_initial_assignment
+            or user_has_any_permission(request.user, "incident:assign", "incident:manage")
         ):
             return failure("Only NOC, leads, or admins can set incident assignment.", status_code=403)
         serializer = self.get_serializer(data=request.data)

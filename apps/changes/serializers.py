@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import Change, Approval, ChangeCI
 from apps.accounts.serializers import UserSerializer
 from apps.assignments.validation import validate_assignment_attrs
+from apps.organizations.models import Organization
 from apps.organizations.serializers import OrganizationSerializer
 from apps.incidents.models import Activity, WorkNote
 
@@ -129,6 +130,13 @@ class ChangeSerializer(serializers.ModelSerializer):
 
 
 class ChangeCreateSerializer(serializers.ModelSerializer):
+    organization_id = serializers.PrimaryKeyRelatedField(
+        source='organization',
+        write_only=True,
+        required=False,
+        queryset=Organization.objects.filter(is_active=True),
+    )
+
     class Meta:
         model = Change
         fields = [
@@ -136,16 +144,20 @@ class ChangeCreateSerializer(serializers.ModelSerializer):
             'assigned_to', 'assignment_group', 'justification', 'implementation_plan',
             'rollback_plan', 'test_plan', 'communication_plan', 'planned_start_date',
             'planned_end_date', 'affected_services', 'downtime', 'user_impact',
-            'git_repo_url', 'git_branch', 'git_commit_hash', 'pull_request_url'
+            'git_repo_url', 'git_branch', 'git_commit_hash', 'pull_request_url',
+            'organization_id',
         ]
 
     def create(self, validated_data):
         from apps.common.utils import generate_record_number
+        from apps.common.permissions import is_service_desk_staff
 
         request = self.context['request']
-        organization = getattr(request, "organization", None) or getattr(request.user, "organization", None)
+        organization = validated_data.pop('organization', None) or getattr(request, "organization", None) or getattr(request.user, "organization", None)
         if organization is None:
             raise serializers.ValidationError("User must belong to an organisation to create a change.")
+        if not is_service_desk_staff(request.user) and organization.id != request.user.organization_id:
+            raise serializers.ValidationError({"organization_id": "Organization access denied."})
         validate_assignment_attrs(validated_data, organization=organization)
         validated_data['number'] = generate_record_number("CHG", organization, "last_change_number")
         validated_data['created_by'] = request.user

@@ -12,6 +12,7 @@ from apps.common.permissions import (
     DenyViewerMutations,
     can_assign_service_record,
     can_edit_service_record,
+    is_service_desk_staff,
     user_has_any_permission,
 )
 from apps.common.responses import failure, success
@@ -90,10 +91,14 @@ class ChangeListCreateView(OrgQuerysetMixin, generics.ListCreateAPIView):
     def create(self, request, *args, **kwargs):
         if not user_has_any_permission(request.user, "change:create", "change:manage"):
             return failure("You do not have permission to create changes.", status_code=403)
-        if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not user_has_any_permission(
+        can_set_initial_assignment = is_service_desk_staff(request.user) and user_has_any_permission(
             request.user,
-            "change:assign",
+            "change:create",
             "change:manage",
+        )
+        if ASSIGNMENT_FIELDS.intersection(request.data.keys()) and not (
+            can_set_initial_assignment
+            or user_has_any_permission(request.user, "change:assign", "change:manage")
         ):
             return failure("Only NOC, leads, or admins can set change assignment.", status_code=403)
         serializer = self.get_serializer(data=request.data)

@@ -188,6 +188,20 @@ class RoleCompatibilityTests(APITestCase):
         self.assertTrue(user_has_permission(user, "incident:update"))
         self.assertTrue(user.has_role(Roles.ENGINEER))
 
+    def test_engineer_role_can_create_core_service_records(self):
+        user = User.objects.create_user(
+            username="resolver@example.com",
+            email="resolver@example.com",
+            password="TempPass123!",
+        )
+        user.roles.add(Role.objects.create(name=Roles.ENGINEER))
+
+        self.assertTrue(user_has_permission(user, "incident:create"))
+        self.assertTrue(user_has_permission(user, "problem:create"))
+        self.assertTrue(user_has_permission(user, "change:create"))
+        self.assertTrue(user_has_permission(user, "service_request:create"))
+        self.assertFalse(user_has_permission(user, "incident:assign"))
+
 
 class RolePermissionAccessTests(APITestCase):
     def setUp(self):

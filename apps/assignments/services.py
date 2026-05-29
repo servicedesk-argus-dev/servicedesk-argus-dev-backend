@@ -87,7 +87,7 @@ def _resolve_individual(incident, team):
         return skilled_user
         
     # 3. Round-Robin fallback
-    rr_user = _round_robin_user(team)
+    rr_user = _round_robin_user(team, incident.organization)
     if rr_user:
         logger.info(f"Resolved individual via round-robin: {rr_user.email}")
         return rr_user
@@ -177,16 +177,29 @@ def _find_skilled_user(team, incident):
     return eligible_users.first()
 
 
-def _round_robin_user(team):
+def _round_robin_user(team, organization):
     """
-    Return next eligible member using round-robin counter.
+    Return next eligible member using a client-scoped round-robin counter.
+
+    Teams can be global resolver teams with no organization. The counter still
+    needs to be scoped to the incident's client organization so one client's
+    routing does not affect another client's rotation.
     """
+    if organization is None:
+        logger.warning("Round-robin skipped for team %s because incident has no organization", team.id)
+        return None
+
     counter, created = RoundRobinCounter.objects.get_or_create(
         team=team,
-        organization=team.organization
+        organization=organization,
     )
     
-    members = TeamMember.objects.filter(team=team, user__is_active=True).order_by('joined_at')
+    members = TeamMember.objects.filter(
+        team=team,
+        is_assignable=True,
+        user__is_active=True,
+        user__is_active_member=True,
+    ).order_by('joined_at')
     if not members.exists():
         return None
         

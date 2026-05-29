@@ -1,4 +1,5 @@
 from decimal import Decimal
+import re
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
@@ -20,6 +21,15 @@ def team_summary(team):
     if not team:
         return None
     return {"id": str(team.id), "name": team.name}
+
+
+def _first_int(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+    match = re.search(r"\d+", str(value))
+    return int(match.group(0)) if match else None
 
 
 CATALOG_TASK_TERMINAL_STATES = {
@@ -117,6 +127,16 @@ def _active_organization_for_request(request):
     if is_service_desk_staff(request.user):
         return Organization.objects.filter(is_active=True).order_by("name").first()
     return None
+
+
+def _has_explicit_organization_context(request):
+    return bool(
+        request.data.get("organizationId")
+        or request.data.get("organization_id")
+        or request.query_params.get("organization")
+        or request.query_params.get("organization_id")
+        or getattr(request, "organization_id", None)
+    )
 
 
 class CatalogCategoryMiniSerializer(serializers.ModelSerializer):
@@ -404,6 +424,9 @@ class RequestedItemSerializer(serializers.ModelSerializer):
 
 class ServiceRequestSerializer(serializers.ModelSerializer):
     shortDescription = serializers.CharField(source="short_description", read_only=True)
+    catalogItemName = serializers.CharField(source="catalog_item_label", read_only=True, allow_null=True)
+    category = serializers.CharField(source="category_label", read_only=True, allow_null=True)
+    estimatedDelivery = serializers.CharField(source="estimated_delivery", read_only=True, allow_null=True)
     requestedById = serializers.UUIDField(source="requested_for_id", read_only=True)
     openedById = serializers.UUIDField(source="opened_by_id", read_only=True)
     assignedToId = serializers.UUIDField(source="assigned_to_id", read_only=True, allow_null=True)
@@ -432,6 +455,9 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
             "description",
             "state",
             "priority",
+            "catalogItemName",
+            "category",
+            "estimatedDelivery",
             "requestedById",
             "openedById",
             "assignedToId",
@@ -500,7 +526,10 @@ class ServiceRequestSerializer(serializers.ModelSerializer):
 
 
 class ServiceRequestCreateSerializer(serializers.Serializer):
-    catalogItemId = serializers.UUIDField()
+    catalogItemId = serializers.UUIDField(required=False, allow_null=True)
+    catalogItemName = serializers.CharField(required=False, allow_blank=True, max_length=200)
+    category = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    estimatedDelivery = serializers.CharField(required=False, allow_blank=True, max_length=100)
     quantity = serializers.IntegerField(default=1, min_value=1, max_value=99)
     priority = serializers.ChoiceField(choices=["P1", "P2", "P3", "P4"], default="P3")
     shortDescription = serializers.CharField(required=False, allow_blank=True, max_length=255)
@@ -513,19 +542,69 @@ class ServiceRequestCreateSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         request = self.context["request"]
+        catalog_item = None
+        catalog_item_id = attrs.get("catalogItemId")
+
+        if catalog_item_id:
+            catalog_item = (
+                CatalogItem.objects.select_related("category", "fulfillment_group", "organization")
+                .filter(id=catalog_item_id, is_active=True)
+                .first()
+            )
+            if catalog_item is None:
+                raise serializers.ValidationError({"catalogItemId": "Catalog item not found."})
+
         organization = _active_organization_for_request(request)
+        if catalog_item and is_service_desk_staff(request.user) and not _has_explicit_organization_context(request):
+            organization = catalog_item.organization
+
         if organization is None:
             raise serializers.ValidationError("Organization context is required.")
-
-        catalog_item = (
-            CatalogItem.objects.select_related("category", "fulfillment_group", "organization")
-            .filter(id=attrs["catalogItemId"], is_active=True)
-            .first()
-        )
-        if catalog_item is None:
-            raise serializers.ValidationError({"catalogItemId": "Catalog item not found."})
-        if catalog_item.organization_id != organization.id:
+        if catalog_item and catalog_item.organization_id != organization.id:
             raise serializers.ValidationError({"catalogItemId": "Catalog item is outside this organization."})
+
+        catalog_item_name = (attrs.get("catalogItemName") or "").strip()
+        category_label = (attrs.get("category") or "").strip()
+        estimated_delivery = (attrs.get("estimatedDelivery") or "").strip()
+
+        if catalog_item is None:
+            if not catalog_item_name:
+                raise serializers.ValidationError({"catalogItemName": "Catalog item is required."})
+            category_name = category_label or "General"
+            category_label = category_name
+            category = CatalogCategory.objects.filter(
+                organization=organization,
+                name__iexact=category_name,
+            ).order_by("created_at").first()
+            if category is None:
+                category = CatalogCategory.objects.create(
+                    organization=organization,
+                    name=category_name,
+                    description="Typed service request category",
+                    is_active=True,
+                )
+
+            catalog_item = CatalogItem.objects.filter(
+                organization=organization,
+                category=category,
+                name__iexact=catalog_item_name,
+            ).order_by("created_at").first()
+            if catalog_item is None:
+                catalog_item = CatalogItem.objects.create(
+                    organization=organization,
+                    category=category,
+                    name=catalog_item_name,
+                    short_description=catalog_item_name,
+                    description=attrs.get("description") or attrs.get("notes") or catalog_item_name,
+                    type=CatalogItem.Type.SERVICE,
+                    estimated_days=_first_int(estimated_delivery),
+                    is_active=True,
+                )
+        else:
+            catalog_item_name = catalog_item_name or catalog_item.name
+            category_label = category_label or getattr(catalog_item.category, "name", "") or catalog_item.get_type_display()
+            if not estimated_delivery and catalog_item.estimated_days:
+                estimated_delivery = f"{catalog_item.estimated_days} day(s)"
 
         requested_for = request.user
         requested_for_id = attrs.get("requestedForId")
@@ -538,6 +617,9 @@ class ServiceRequestCreateSerializer(serializers.Serializer):
 
         attrs["organization"] = organization
         attrs["catalog_item"] = catalog_item
+        attrs["catalog_item_label"] = catalog_item_name
+        attrs["category_label"] = category_label
+        attrs["estimated_delivery"] = estimated_delivery
         attrs["requested_for"] = requested_for
         return attrs
 
@@ -547,17 +629,30 @@ class ServiceRequestCreateSerializer(serializers.Serializer):
         organization = validated_data["organization"]
         catalog_item = validated_data["catalog_item"]
         requested_for = validated_data["requested_for"]
+        catalog_item_label = validated_data.get("catalog_item_label") or catalog_item.name
+        category_label = validated_data.get("category_label") or getattr(catalog_item.category, "name", "")
+        estimated_delivery = validated_data.get("estimated_delivery") or (
+            f"{catalog_item.estimated_days} day(s)" if catalog_item.estimated_days else ""
+        )
         quantity = validated_data.get("quantity", 1)
         needs_approval = catalog_item.approval_required
-        variables = validated_data.get("variables") or validated_data.get("formData") or {}
+        variables = dict(validated_data.get("variables") or validated_data.get("formData") or {})
+        variables.setdefault("catalog_item", catalog_item_label)
+        if category_label:
+            variables.setdefault("category", category_label)
+        if estimated_delivery:
+            variables.setdefault("estimated_delivery", estimated_delivery)
         description = validated_data.get("description") or validated_data.get("notes") or ""
-        short_description = validated_data.get("shortDescription") or catalog_item.name
+        short_description = validated_data.get("shortDescription") or catalog_item_label
 
         service_request = ServiceRequest.objects.create(
             number=generate_record_number("REQ", organization, "last_service_request_number"),
             short_description=short_description,
             description=description,
             priority=validated_data.get("priority", "P3"),
+            catalog_item_label=catalog_item_label,
+            category_label=category_label,
+            estimated_delivery=estimated_delivery,
             requested_for=requested_for,
             opened_by=request.user,
             organization=organization,

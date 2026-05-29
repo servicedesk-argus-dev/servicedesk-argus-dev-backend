@@ -6,6 +6,7 @@ from uuid import UUID
 from apps.common.mixins import OrgQuerysetMixin
 from apps.common.permissions import is_service_desk_staff
 from apps.common.responses import success, failure
+from apps.organizations.models import Organization
 from apps.teams.models import Team, TeamMember
 from apps.teams.serializers import TeamSerializer, TeamMemberSerializer
 from apps.accounts.serializers import UserSerializer
@@ -56,8 +57,23 @@ class AssignmentPreviewView(APIView):
     def post(self, request):
         from apps.incidents.models import Incident
 
+        requested_org_id = request.data.get("organizationId") or request.data.get("organization_id")
         organization = getattr(request, "organization", None) or getattr(request.user, "organization", None)
+
+        if requested_org_id and is_service_desk_staff(request.user):
+            try:
+                requested_org_id = UUID(str(requested_org_id))
+            except (AttributeError, TypeError, ValueError):
+                return failure("organizationId must be a valid UUID", status_code=400)
+            organization = Organization.objects.filter(id=requested_org_id, is_active=True).first()
+
         if organization is None:
+            if is_service_desk_staff(request.user):
+                return success({
+                    "suggested_group": None,
+                    "suggested_user": None,
+                    "reason": "Select a client organization to preview assignment.",
+                })
             return failure("Organization access denied", status_code=403)
 
         config_item_id = request.data.get("config_item_id") or None
