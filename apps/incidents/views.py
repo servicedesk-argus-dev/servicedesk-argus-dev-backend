@@ -1,4 +1,4 @@
-from rest_framework import generics, status
+from rest_framework import generics, serializers, status
 from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
@@ -16,6 +16,7 @@ from apps.common.permissions import (
 )
 from apps.common.responses import success, failure
 from apps.common.pagination import DefaultPagination
+from apps.assignments.validation import validate_assignment_targets
 from apps.changes.models import Change
 from apps.problems.models import Problem
 from apps.sla.services import refresh_incident_sla_state
@@ -593,20 +594,41 @@ class IncidentReassignView(APIView):
         if not can_assign_service_record(request.user, incident):
             return failure("Only NOC, leads, or admins can assign incidents.", status_code=403)
             
-        assigned_to_id = request.data.get("assigned_to")
-        assignment_group_id = request.data.get("assignment_group")
-        
-        if assigned_to_id:
-            from apps.accounts.models import User
-            user = User.objects.filter(pk=assigned_to_id).first()
-            if user:
-                incident.assigned_to = user
-                
-        if assignment_group_id:
-            from apps.teams.models import Team
-            team = Team.objects.filter(pk=assignment_group_id).first()
-            if team:
-                incident.assignment_group = team
+        from apps.accounts.models import User
+        from apps.teams.models import Team
+
+        assigned_to = incident.assigned_to
+        assignment_group = incident.assignment_group
+
+        if "assigned_to" in request.data:
+            assigned_to_id = request.data.get("assigned_to")
+            if assigned_to_id:
+                assigned_to = User.objects.filter(pk=assigned_to_id).first()
+                if assigned_to is None:
+                    return failure("Selected assignee was not found.", status_code=400)
+            else:
+                assigned_to = None
+
+        if "assignment_group" in request.data:
+            assignment_group_id = request.data.get("assignment_group")
+            if assignment_group_id:
+                assignment_group = Team.objects.filter(pk=assignment_group_id).first()
+                if assignment_group is None:
+                    return failure("Selected assignment group was not found.", status_code=400)
+            else:
+                assignment_group = None
+
+        try:
+            validate_assignment_targets(
+                assignment_group=assignment_group,
+                assigned_to=assigned_to,
+                organization=incident.organization,
+            )
+        except serializers.ValidationError as exc:
+            return failure("Validation failed.", errors=exc.detail, status_code=400)
+
+        incident.assigned_to = assigned_to
+        incident.assignment_group = assignment_group
                 
         incident.save()
         

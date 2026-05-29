@@ -148,6 +148,7 @@ def _member_payload(member):
         },
         "team": {"id": str(member.team_id), "name": member.team.name},
         "isPrimary": member.role == "LEAD",
+        "isAssignable": member.is_assignable,
     }
 
 

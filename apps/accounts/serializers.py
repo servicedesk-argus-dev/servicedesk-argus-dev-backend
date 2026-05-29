@@ -249,6 +249,8 @@ class UserSerializer(serializers.ModelSerializer):
             {
                 "id": str(membership.id),
                 "role": membership.role,
+                "is_assignable": membership.is_assignable,
+                "isAssignable": membership.is_assignable,
                 "team": {
                     "id": str(membership.team_id),
                     "name": membership.team.name,

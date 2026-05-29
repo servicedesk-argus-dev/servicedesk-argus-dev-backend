@@ -46,6 +46,10 @@ class TeamMember(models.Model):
     team = models.ForeignKey('teams.Team', on_delete=models.CASCADE, related_name='members')
     user = models.ForeignKey('accounts.User', on_delete=models.CASCADE, related_name='team_memberships')
     role = models.CharField(max_length=20, choices=Team.MemberRole.choices, default=Team.MemberRole.MEMBER)
+    is_assignable = models.BooleanField(
+        default=True,
+        help_text="When enabled this user can be selected as an assignee for records in this team.",
+    )
     
     joined_at = models.DateTimeField(auto_now_add=True)
 

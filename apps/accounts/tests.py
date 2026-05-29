@@ -79,6 +79,26 @@ class ManagedAccountCreationTests(APITestCase):
         self.assertTrue(user_has_permission(user, "client:manage"))
         self.assertFalse(user_has_permission(user, "*:*"))
 
+    def test_super_admin_creates_admin_account_with_resolver_team(self):
+        response = self.client.post(
+            "/api/v1/auth/users/",
+            {
+                "email": "admin-resolver@example.com",
+                "password": "TempPass123!",
+                "role_name": "Org Admin",
+                "team_ids": [str(self.team.id)],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.data)
+        user = User.objects.get(email="admin-resolver@example.com")
+        self.assertEqual(user.role_names, [Roles.ORG_ADMIN])
+        self.assertEqual(list(user.team_memberships.values_list("team__name", flat=True)), ["Infra Team"])
+        self.assertTrue(user.team_memberships.get(team=self.team).is_assignable)
+        self.assertTrue(user_has_permission(user, "user:manage"))
+        self.assertTrue(user_has_permission(user, "incident:update"))
+
     def test_admin_alias_creates_org_admin_account(self):
         response = self.client.post(
             "/api/v1/auth/users/",

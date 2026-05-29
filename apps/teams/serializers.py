@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from .models import Team, TeamMember
 from apps.accounts.serializers import UserSerializer
 from apps.common.permissions import is_service_desk_staff
@@ -19,10 +20,11 @@ class TeamMemberSerializer(serializers.ModelSerializer):
     )
     team_id = serializers.UUIDField(source='team.id', read_only=True)
     joinedAt = serializers.DateTimeField(source='joined_at', read_only=True)
+    isAssignable = serializers.BooleanField(source='is_assignable', required=False)
 
     class Meta:
         model = TeamMember
-        fields = ['id', 'user', 'user_id', 'team_id', 'role', 'joined_at', 'joinedAt']
+        fields = ['id', 'user', 'user_id', 'team_id', 'role', 'is_assignable', 'isAssignable', 'joined_at', 'joinedAt']
         read_only_fields = ['id', 'joined_at']
 
     def validate_user_id(self, user):
@@ -89,7 +91,7 @@ class TeamSerializer(serializers.ModelSerializer):
                 or getattr(request, "organization_id", None)
             )
             if org_id:
-                members = members.filter(user__organization_id=org_id)
+                members = members.filter(Q(user__organization_id=org_id) | Q(user__organization__isnull=True))
         members = members.order_by("joined_at", "user__first_name", "user__last_name", "user__email")
         return TeamMemberSerializer(members, many=True).data
 

@@ -2,7 +2,7 @@ from rest_framework.test import APIClient, APITestCase
 
 from apps.accounts.models import User
 from apps.organizations.models import Organization
-from apps.teams.models import Team
+from apps.teams.models import Team, TeamMember
 
 
 class TeamListScopeTests(APITestCase):
@@ -46,3 +46,16 @@ class TeamListScopeTests(APITestCase):
             {"Infra Team", "DevOps Team", "Software Team", "Client Support"},
         )
         self.assertEqual(response.data["pagination"]["total"], 4)
+
+    def test_org_filtered_global_team_keeps_internal_admin_members(self):
+        infra_team = Team.objects.get(name="Infra Team", organization__isnull=True)
+        TeamMember.objects.create(team=infra_team, user=self.admin)
+
+        response = self.client.get(f"/api/v1/teams/?organization_id={self.org_a.id}")
+
+        self.assertEqual(response.status_code, 200, response.data)
+        infra_payload = next(team for team in response.data["data"] if team["name"] == "Infra Team")
+        member_emails = {member["user"]["email"] for member in infra_payload["members"]}
+        self.assertIn(self.admin.email, member_emails)
+        admin_member = next(member for member in infra_payload["members"] if member["user"]["email"] == self.admin.email)
+        self.assertTrue(admin_member["isAssignable"])

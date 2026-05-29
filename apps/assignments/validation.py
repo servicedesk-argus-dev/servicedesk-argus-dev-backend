@@ -34,12 +34,13 @@ def validate_assignment_targets(*, assignment_group, assigned_to, organization):
         is_member = TeamMember.objects.filter(
             team=assignment_group,
             user=assigned_to,
+            is_assignable=True,
             user__is_active=True,
             user__is_active_member=True,
         ).exists()
         if not is_member:
             raise serializers.ValidationError(
-                {"assigned_to": "Selected assignee must be a member of the assignment group."}
+                {"assigned_to": "Selected assignee must be an assignable member of the assignment group."}
             )
 
 
